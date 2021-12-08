@@ -181,3 +181,27 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
 
 	return (ssize_t)to_read;
 }
+
+int tfs_copy_to_external_fs(char const *source_path, char const *dest_path) {
+
+	/* Check for valid pathnames */
+	if (!valid_pathname(source_path) || dest_path == NULL) {
+		return -1;
+	}
+
+	int source_file = tfs_open(source_path, 0);
+	FILE *dest_file = fopen(dest_path, "w");
+
+	char buffer[128];
+	ssize_t bytes_read;
+
+	do {
+		bytes_read = tfs_read(source_file, buffer, 128);
+		fwrite(buffer, sizeof(char), bytes_read, dest_file);
+	} while (bytes_read == 128);
+
+	fclose(dest_file);
+	tfs_close(source_file);
+
+	return 0;
+}

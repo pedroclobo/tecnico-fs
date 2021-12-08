@@ -1,4 +1,4 @@
-#include "../src/operations.h"
+#include "../fs/operations.h"
 #include <assert.h>
 #include <string.h>
 
@@ -32,7 +32,7 @@ int main() {
 
 	assert(tfs_close(f) != -1);
 
-	printf("Successful test.\n");
+	printf("\033[0;32mSuccessful test.\n\033[0m");
 
 	return 0;
 }

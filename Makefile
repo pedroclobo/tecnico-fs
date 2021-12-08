@@ -1,16 +1,26 @@
 CC = gcc
 CFLAGS = -std=c11 -D_POSIX_C_SOURCE=200809L
 
-SOURCES := $(wildcard */*.c)
-HEADERS := $(wildcard */*.h)
+INCLUDE_DIRS := fs .
+INCLUDES = $(addprefix -I, $(INCLUDE_DIRS))
+
+SOURCES := $(wildcard fs/*.c)
+HEADERS := $(wildcard fs/*.h)
 OBJECTS := $(SOURCES:.c=.o)
-TARGET_EXECS := tests/test1
 
-.PHONY: all clean
+TEST_FILES := $(wildcard tests/*.c)
+TEST_OBJECTS := $(TEST_FILES:.c=.o)
+TESTS := $(TEST_FILES:.c=)
 
-all: $(TARGET_EXECS)
+all:: $(OBJECTS)
 
-tests/test1: tests/test1.o src/operations.o src/state.o
+test%: $(OBJECTS) test%.o
+	$(CC) $(CFLAGS) $^ -o $@
 
-clean:
-	rm -f $(OBJECTS) $(TARGET_EXECS)
+tests:: $(OBJECTS) $(TEST_OBJECTS) $(TESTS)
+	@for test in $(TESTS); do \
+		./$$test; \
+	done
+
+clean::
+	rm -f $(OBJECTS) $(TARGET_EXECS) $(TESTS) $(TEST_OBJECTS) *.txt
