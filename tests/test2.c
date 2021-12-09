@@ -10,6 +10,7 @@ int main() {
 	char *str = "AAA!";
 	char *path = "/f1";
 	char buffer[40];
+	memset(buffer, 0, sizeof(buffer));
 
 	int f;
 

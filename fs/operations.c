@@ -119,6 +119,7 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
 		to_write = BLOCK_SIZE - file->of_offset;
 	}
 
+	// FIXME
 	if (to_write > 0) {
 		if (inode->i_size == 0) {
 			/* If empty file, allocate new block */
@@ -203,6 +204,8 @@ int tfs_copy_to_external_fs(char const *source_path, char const *dest_path) {
 
 	/* Read from source_file and write to dest_file */
 	char buffer[128];
+	memset(buffer, 0, sizeof(buffer));
+
 	ssize_t bytes_read;
 
 	do {

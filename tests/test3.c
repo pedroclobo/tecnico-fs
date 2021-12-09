@@ -28,6 +28,7 @@ int main() {
 	random_string(str, size);
 
 	char buffer[size];
+	memset(buffer, 0, sizeof(buffer));
 
 	/* Create and write str to new tfs file */
 	tfs_init();

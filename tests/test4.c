@@ -10,6 +10,7 @@ int main() {
 	char *str = "AAA!";
 	char *path = "/f1";
 	char buffer[40];
+	memset(buffer, 0, sizeof(buffer));
 
 	/* Create and write str to new tfs file */
 	tfs_init();
