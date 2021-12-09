@@ -189,9 +189,19 @@ int tfs_copy_to_external_fs(char const *source_path, char const *dest_path) {
 		return -1;
 	}
 
+	/* Open tfs file */
 	int source_file = tfs_open(source_path, 0);
-	FILE *dest_file = fopen(dest_path, "w");
+	if (source_file == -1) {
+		return -1;
+	}
 
+	/* Open filesystem file */
+	FILE *dest_file = fopen(dest_path, "w");
+	if (dest_file == NULL) {
+		return -1;
+	}
+
+	/* Read from source_file and write to dest_file */
 	char buffer[128];
 	ssize_t bytes_read;
 
@@ -200,8 +210,18 @@ int tfs_copy_to_external_fs(char const *source_path, char const *dest_path) {
 		fwrite(buffer, sizeof(char), bytes_read, dest_file);
 	} while (bytes_read == 128);
 
-	fclose(dest_file);
-	tfs_close(source_file);
+	/* Error reading file */
+	if (bytes_read == -1) {
+		return -1;
+	}
+
+	/* Close files */
+	if (dest_file != NULL) {
+		fclose(dest_file);
+	}
+	if (source_file != -1) {
+		tfs_close(source_file);
+	}
 
 	return 0;
 }
