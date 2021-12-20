@@ -7,10 +7,12 @@
  */
 int main() {
 
-	tfs_init();
+	assert(tfs_init() != -1);
 
 	/* Write from invalid tfs file */
 	assert(tfs_copy_to_external_fs("f1", "write.txt") == -1);
+
+	assert(tfs_destroy() != -1);
 
 	printf("\033[0;32mSuccessful test.\n\033[0m");
 
