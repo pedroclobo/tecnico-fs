@@ -1,4 +1,6 @@
 #include "operations.h"
+#include "config.h"
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,8 +59,11 @@ int tfs_open(char const *name, int flags) {
 		/* Trucate (if requested) */
 		if (flags & TFS_O_TRUNC) {
 			if (inode->i_size > 0) {
-				if (data_block_free(inode->i_data_block) == -1) {
-					return -1;
+				int blocks = number_blocks_alloc(inum);
+				for (int i = 0; i < blocks; i++) {
+					if (data_block_free(inode->i_data_block[i]) == -1) {
+						return -1;
+					}
 				}
 				inode->i_size = 0;
 			}
@@ -114,35 +119,54 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
 		return -1;
 	}
 
-	/* Determine how many bytes to write */
-	if (to_write + file->of_offset > BLOCK_SIZE) {
-		to_write = BLOCK_SIZE - file->of_offset;
-	}
+	/* Perform the write */
+	ssize_t written = 0;
+	ssize_t current_written = 0;
+	void *block;
+	int block_ind = file->of_offset / BLOCK_SIZE;
 
-	// FIXME
-	if (to_write > 0) {
-		if (inode->i_size == 0) {
-			/* If empty file, allocate new block */
-			inode->i_data_block = data_block_alloc();
+	while (to_write > 0) {
+
+		/* Alloc new block */
+		if (inode->i_data_block[block_ind] == -1) {
+			inode->i_data_block[block_ind] = data_block_alloc();
 		}
 
-		void *block = data_block_get(inode->i_data_block);
-		if (block == NULL) {
+		/* Check for valid block */
+		if ((block = data_block_get(inode->i_data_block[block_ind++])) == NULL) {
 			return -1;
 		}
 
-		/* Perform the actual write */
-		memcpy(block + file->of_offset, buffer, to_write);
+		/* First block */
+		if (written == 0) {
+			if ((to_write + (file->of_offset % BLOCK_SIZE)) / BLOCK_SIZE > 0) {
+				current_written = BLOCK_SIZE - (file->of_offset % BLOCK_SIZE);
+			} else {
+				current_written = to_write;
+			}
+			memcpy(block + (file->of_offset % BLOCK_SIZE), buffer, current_written);
 
-		/* The offset associated with the file handle is
-		 * incremented accordingly */
-		file->of_offset += to_write;
-		if (file->of_offset > inode->i_size) {
-			inode->i_size = file->of_offset;
+		/* Other blocks */
+		} else {
+			if (to_write / BLOCK_SIZE > 0) {
+				current_written = BLOCK_SIZE;
+			} else {
+				current_written = to_write;
+			}
+			memcpy(block, buffer + written, current_written);
 		}
+
+		written += current_written;
+		to_write -= current_written;
 	}
 
-	return (ssize_t)to_write;
+	/* Increment the offset associated with the file handle */
+	file->of_offset += written;
+	if (file->of_offset > inode->i_size) {
+		inode->i_size = file->of_offset;
+	}
+
+	return written;
 }
 
 ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
@@ -163,20 +187,48 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
 		to_read = len;
 	}
 
-	if (to_read > 0) {
-		void *block = data_block_get(inode->i_data_block);
-		if (block == NULL) {
+	/* Perform the read */
+	ssize_t read = 0;
+	ssize_t current_read = 0;
+	void *block;
+	int block_ind = file->of_offset / BLOCK_SIZE;
+
+	while (to_read > 0) {
+
+		/* Check for valid block */
+		if ((block = data_block_get(inode->i_data_block[block_ind++])) == NULL) {
 			return -1;
 		}
 
 		/* Perform the actual read */
-		memcpy(buffer, block + file->of_offset, to_read);
-		/* The offset associated with the file handle is
-		 * incremented accordingly */
-		file->of_offset += to_read;
+		/* First block */
+		if (read == 0) {
+			if ((to_read + (file->of_offset % BLOCK_SIZE)) / BLOCK_SIZE > 0) {
+				current_read = BLOCK_SIZE - (file->of_offset % BLOCK_SIZE);
+			} else {
+				current_read = to_read;
+			}
+			memcpy(buffer, block + (file->of_offset % BLOCK_SIZE), current_read);
+
+		/* Other blocks */
+		} else {
+			if (to_read / BLOCK_SIZE > 0) {
+				current_read = BLOCK_SIZE;
+			} else {
+				current_read = to_read;
+			}
+			memcpy(buffer, block, current_read);
+		}
+
+		read += current_read;
+		to_read -= current_read;
 	}
 
-	return (ssize_t)to_read;
+	/* The offset associated with the file handle is
+	 * incremented accordingly */
+	file->of_offset += read;
+
+	return read;
 }
 
 int tfs_copy_to_external_fs(char const *source_path, char const *dest_path) {
