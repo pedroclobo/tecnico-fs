@@ -104,9 +104,9 @@ int inode_create(inode_type n_type) {
 			if (n_type == T_DIRECTORY) {
 			/* Initializes directory (filling its block with empty
 			 * entries, labeled with inumber==-1) */
-				inode_table[inumber].i_size = BLOCK_SIZE * BLOCK_NUMBER;
+				inode_table[inumber].i_size = BLOCK_SIZE * DIRECT_BLOCK_NUMBER;
 
-				for (int i = 0; i < BLOCK_NUMBER; i++) {
+				for (int i = 0; i < DIRECT_BLOCK_NUMBER; i++) {
 					int b = data_block_alloc();
 					if (b == -1) {
 						freeinode_ts[inumber] = FREE;
@@ -130,10 +130,13 @@ int inode_create(inode_type n_type) {
 			} else {
 				/* In case of a new file, simply sets its size to 0 */
 				inode_table[inumber].i_size = 0;
-				for (int i = 0; i < BLOCK_NUMBER; i++) {
+				for (int i = 0; i < DIRECT_BLOCK_NUMBER; i++) {
 					inode_table[inumber].i_data_block[i] = -1;
 				}
 			}
+
+			/* Indirect block */
+			inode_table[inumber].i_indirect_block = -1;
 
 			return inumber;
 		}
@@ -142,11 +145,18 @@ int inode_create(inode_type n_type) {
 	return -1;
 }
 
+/* FIXME */
+/*
+ * Determines the number of blocks the i-node has allocated.
+ * Input:
+ *  - inumber: i-node's number
+ * Returns: the number of allocated inodes
+ */
 int number_blocks_alloc(int inumber) {
 	inode_t inode = inode_table[inumber];
 	int count = 0;
 
-	for (int i = 0; i < BLOCK_NUMBER; i++) {
+	for (int i = 0; i < DIRECT_BLOCK_NUMBER; i++) {
 		if (inode.i_data_block[i] != -1) {
 			count++;
 		}
@@ -177,6 +187,21 @@ int inode_delete(int inumber) {
 	if (inode_table[inumber].i_size > 0) {
 		for (int i = 0; i < blocks; i++) {
 			if (data_block_free(inode_table[inumber].i_data_block[i]) == -1) {
+				return -1;
+			}
+		}
+
+		/* Free indirect block and its blocks */
+		if (inode_table[inumber].i_indirect_block != -1) {
+			int *indirect_block = data_block_get(inode_table[inumber].i_indirect_block);
+
+			for (size_t i = 0; indirect_block[i] != -1; i++) {
+				if (data_block_free(indirect_block[i] == -1)) {
+					return -1;
+				}
+			}
+
+			if (data_block_free(inode_table[inumber].i_indirect_block != -1)) {
 				return -1;
 			}
 		}

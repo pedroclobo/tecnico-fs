@@ -59,12 +59,21 @@ int tfs_open(char const *name, int flags) {
 		/* Trucate (if requested) */
 		if (flags & TFS_O_TRUNC) {
 			if (inode->i_size > 0) {
-				int blocks = number_blocks_alloc(inum);
-				for (int i = 0; i < blocks; i++) {
+				for (int i = 0; inode->i_data_block[i] != -1; i++) {
 					if (data_block_free(inode->i_data_block[i]) == -1) {
 						return -1;
 					}
 				}
+
+				if (inode->i_indirect_block != -1) {
+					int *indirect_block = data_block_get(inode->i_indirect_block);
+					for (int i = 0; indirect_block[i] != -1; i++) {
+						if (data_block_free(indirect_block[i]) == -1) {
+							return -1;
+						}
+					}
+				}
+
 				inode->i_size = 0;
 			}
 		}
@@ -123,17 +132,48 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
 	ssize_t written = 0;
 	ssize_t current_written = 0;
 	void *block;
+	int *indirect_block;
 	int block_ind = file->of_offset / BLOCK_SIZE;
 
 	while (to_write > 0) {
 
-		/* Alloc new block */
-		if (inode->i_data_block[block_ind] == -1) {
-			inode->i_data_block[block_ind] = data_block_alloc();
-		}
+		/* Get new block */
+		if (block_ind < DIRECT_BLOCK_NUMBER) {
+			if (inode->i_data_block[block_ind] == -1) {
+				inode->i_data_block[block_ind] = data_block_alloc();
+			}
 
-		/* Check for valid block */
-		if ((block = data_block_get(inode->i_data_block[block_ind++])) == NULL) {
+			if ((block = data_block_get(inode->i_data_block[block_ind++])) == NULL) {
+				return -1;
+			}
+
+		} else if (block_ind < INDIRECT_BLOCK_NUMBER + DIRECT_BLOCK_NUMBER) {
+			if (inode->i_indirect_block == -1) {
+				inode->i_indirect_block = data_block_alloc();
+				if ((indirect_block = data_block_get(inode->i_indirect_block)) == NULL) {
+					return -1;
+				}
+
+				/* Initialize index block */
+				for (int i = 0; i < INDIRECT_BLOCK_NUMBER; i++) {
+					indirect_block[i] = -1;
+				}
+			}
+
+			if ((indirect_block = data_block_get(inode->i_indirect_block)) == NULL) {
+				return -1;
+			}
+
+			if (indirect_block[block_ind - DIRECT_BLOCK_NUMBER] == -1) {
+				indirect_block[block_ind - DIRECT_BLOCK_NUMBER] = data_block_alloc();
+			}
+
+			if ((block = data_block_get(indirect_block[block_ind++ - DIRECT_BLOCK_NUMBER])) == NULL) {
+				return -1;
+			}
+
+		/* There's not enough blocks */
+		} else {
 			return -1;
 		}
 
@@ -195,8 +235,21 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
 
 	while (to_read > 0) {
 
-		/* Check for valid block */
-		if ((block = data_block_get(inode->i_data_block[block_ind++])) == NULL) {
+		if (block_ind < DIRECT_BLOCK_NUMBER) {
+			if ((block = data_block_get(inode->i_data_block[block_ind++])) == NULL) {
+				return -1;
+			}
+
+		} else if (block_ind < DIRECT_BLOCK_NUMBER + INDIRECT_BLOCK_NUMBER) {
+			int *indirect_block;
+			if ((indirect_block = data_block_get(inode->i_indirect_block)) == NULL) {
+				return -1;
+			}
+
+			if ((block = data_block_get(indirect_block[block_ind++ - DIRECT_BLOCK_NUMBER])) == NULL) {
+				return -1;
+			}
+		} else {
 			return -1;
 		}
 
