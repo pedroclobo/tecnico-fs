@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -std=c11 -D_POSIX_C_SOURCE=200809L
+CFLAGS = -std=c11 -D_POSIX_C_SOURCE=200809L -fsanitize=address -fsanitize=leak -g
 
 INCLUDE_DIRS := fs .
 INCLUDES = $(addprefix -I, $(INCLUDE_DIRS))
