@@ -1,6 +1,7 @@
 #include "operations.h"
 #include "config.h"
 #include <math.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,10 +49,10 @@ int tfs_open(char const *name, int flags) {
 	}
 
 	inum = tfs_lookup(name);
+
 	if (inum >= 0) {
 		/* The file already exists */
 		inode_t *inode = inode_get(inum);
-
 		if (inode == NULL) {
 			return -1;
 		}
@@ -86,7 +87,7 @@ int tfs_open(char const *name, int flags) {
 		}
 
 	} else if (flags & TFS_O_CREAT) {
-		/* The file doesn't exist; the flags specify that it should be created*/
+		/* The file doesn't exist; the flags specify that it should be created */
 		/* Create inode */
 		inum = inode_create(T_FILE);
 		if (inum == -1) {
@@ -102,6 +103,7 @@ int tfs_open(char const *name, int flags) {
 	} else {
 		return -1;
 	}
+
 
 	/* Finally, add entry to the open file table and
 	 * return the corresponding handle */
@@ -133,48 +135,63 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
 	ssize_t current_written = 0;
 	void *block;
 	int *indirect_block;
-	int block_ind = file->of_offset / BLOCK_SIZE;
 
+	pthread_rwlock_wrlock(&inode->lock);
+	pthread_rwlock_wrlock(&file->lock);
+
+	/* Block to start writing to */
+	int block_ind = file->of_offset / BLOCK_SIZE;
 	while (to_write > 0) {
 
-		/* Get new block */
+		/* Locate current block */
+		/* Direct blocks */
 		if (block_ind < DIRECT_BLOCK_NUMBER) {
+
+			/* Allocate and get direct block */
 			if (inode->i_data_block[block_ind] == -1) {
 				inode->i_data_block[block_ind] = data_block_alloc();
 			}
-
 			if ((block = data_block_get(inode->i_data_block[block_ind++])) == NULL) {
+				pthread_rwlock_unlock(&inode->lock);
+				pthread_rwlock_unlock(&file->lock);
 				return -1;
 			}
 
+		/* Supplemental blocks */
 		} else if (block_ind < INDIRECT_BLOCK_NUMBER + DIRECT_BLOCK_NUMBER) {
 			if (inode->i_indirect_block == -1) {
 				inode->i_indirect_block = data_block_alloc();
 				if ((indirect_block = data_block_get(inode->i_indirect_block)) == NULL) {
+					pthread_rwlock_unlock(&inode->lock);
+					pthread_rwlock_unlock(&file->lock);
 					return -1;
 				}
 
-				/* Initialize index block */
+				/* Initialize supplemental blocks */
 				for (int i = 0; i < INDIRECT_BLOCK_NUMBER; i++) {
 					indirect_block[i] = -1;
 				}
 			}
 
 			if ((indirect_block = data_block_get(inode->i_indirect_block)) == NULL) {
+				pthread_rwlock_unlock(&inode->lock);
+				pthread_rwlock_unlock(&file->lock);
 				return -1;
 			}
 
+			/* Allocate and get supplemental block */
 			if (indirect_block[block_ind - DIRECT_BLOCK_NUMBER] == -1) {
 				indirect_block[block_ind - DIRECT_BLOCK_NUMBER] = data_block_alloc();
 			}
-
 			if ((block = data_block_get(indirect_block[block_ind++ - DIRECT_BLOCK_NUMBER])) == NULL) {
+				pthread_rwlock_unlock(&inode->lock);
+				pthread_rwlock_unlock(&file->lock);
 				return -1;
 			}
 
-		/* There's not enough blocks */
+		/* Can't write the whole buffer */
 		} else {
-			return -1;
+			return written;
 		}
 
 		/* First block */
@@ -205,6 +222,9 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
 	if (file->of_offset > inode->i_size) {
 		inode->i_size = file->of_offset;
 	}
+
+	pthread_rwlock_unlock(&inode->lock);
+	pthread_rwlock_unlock(&file->lock);
 
 	return written;
 }
