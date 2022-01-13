@@ -3,12 +3,15 @@
 #include <string.h>
 
 /*
- * Copy tfs file contents to already existing filesystem file
+ * Copy tfs file contents to already existing filesystem file.
  */
+
+char *path = "/f1";
+
 int main() {
 
 	char *str = "AAA!";
-	char *path = "/f1";
+
 	char buffer[40];
 	memset(buffer, 0, sizeof(buffer));
 
@@ -26,10 +29,7 @@ int main() {
 	/* Write from tfs file to filesystem file */
 	assert(tfs_copy_to_external_fs(path, "write.txt") != -1);
 
-	/* Check if file was created */
-	assert(fp != NULL);
-
-	/* Check if contents are identical */
+	/* Check if contents are identical and file was overwritten */
 	assert(fread(buffer, sizeof(char), strlen(str), fp) == strlen(str));
 	assert(strcmp(buffer, str) == 0);
 

@@ -79,7 +79,7 @@ void state_init() {
 
 	for (size_t i = 0; i < MAX_OPEN_FILES; i++) {
 		free_open_file_entries[i] = FREE;
-		pthread_rwlock_init(&open_file_table[i].lock, NULL);
+		pthread_mutex_init(&open_file_table[i].lock, NULL);
 	}
 }
 
@@ -89,7 +89,7 @@ void state_destroy() {
 	}
 
 	for (size_t i = 0; i < MAX_OPEN_FILES; i++) {
-		pthread_rwlock_destroy(&open_file_table[i].lock);
+		pthread_mutex_destroy(&open_file_table[i].lock);
 	}
 
 	pthread_mutex_destroy(&freeinode_lock);
@@ -399,24 +399,34 @@ void *data_block_get(int block_number) {
  * 	- Initial offset
  * Returns: file handle if successful, -1 otherwise
  */
-int add_to_open_file_table(int inumber, size_t offset) {
-	pthread_mutex_lock(&free_open_file_entries_lock);
+int add_to_open_file_table(int inumber, size_t offset, bool append) {
+	if (pthread_mutex_lock(&free_open_file_entries_lock) != 0) {
+		exit(-1);
+	}
 
 	for (int i = 0; i < MAX_OPEN_FILES; i++) {
 		if (free_open_file_entries[i] == FREE) {
+			printf("%d, FREE\n", i);
 			free_open_file_entries[i] = TAKEN;
+			if (free_open_file_entries[i] == TAKEN)
+				printf("after assignment: %d, TAKEN\n", i);
+			else
+				printf("after assignment: %d, FREE\n", i);
 
-			pthread_rwlock_wrlock(&open_file_table[i].lock);
 
 			open_file_table[i].of_inumber = inumber;
 			open_file_table[i].of_offset = offset;
+			open_file_table[i].of_append = append;
 
-			pthread_rwlock_unlock(&open_file_table[i].lock);
+			pthread_mutex_unlock(&open_file_table[i].lock);
 
 			pthread_mutex_unlock(&free_open_file_entries_lock);
 
+			printf("return value: %d\n", i);
+
 			return i;
 		}
+		printf("%d, TAKEN\n", i);
 	}
 
 	pthread_mutex_unlock(&free_open_file_entries_lock);
@@ -430,7 +440,9 @@ int add_to_open_file_table(int inumber, size_t offset) {
  * Returns 0 is success, -1 otherwise
  */
 int remove_from_open_file_table(int fhandle) {
-	pthread_mutex_lock(&free_open_file_entries_lock);
+	if (pthread_mutex_lock(&free_open_file_entries_lock) != 0) {
+		exit(-1);
+	}
 
 	if (!valid_file_handle(fhandle) || free_open_file_entries[fhandle] != TAKEN) {
 		pthread_mutex_unlock(&free_open_file_entries_lock);

@@ -5,15 +5,15 @@
 #include <string.h>
 
 /*
- * Write concurrently to one tfs file.
- * Expected output is the concatenation of the two strings.
+ * Append concurrently to one tfs file, with the same file handle.
+ * Expected output is one possible concatenation of the two strings.
  */
 
 typedef struct {
-	int fhandle;
+	int f;
 	char *str;
 	size_t size;
-} write_struct;
+} reference;
 
 int random_seed = 1;
 
@@ -30,60 +30,65 @@ void random_string(char *buffer, size_t size) {
 	buffer[i] = '\0';
 }
 
-void *write_to_tfs(void *w_struct) {
-	write_struct *w = (write_struct*) w_struct;
+void *append_to_tfs(void *arg) {
+	reference *r = (reference*) arg;
 
-	assert(tfs_write(w->fhandle, w->str, strlen(w->str)) == strlen(w->str));
+	int f;
+	assert((f = tfs_open(path, TFS_O_APPEND)) != -1);
+
+	assert(tfs_write(f, r->str, strlen(r->str)) == strlen(r->str));
+
+	assert(tfs_close(f) == 0);
 
 	return NULL;
 }
 
 int main() {
-
-	/* Create random large string */
 	size_t size1 = 150000;
+	size_t size2 = 122384;
+
 	char str1[size1];
 	random_string(str1, size1);
 
-	/* Create another random large string */
-	size_t size2 = 122000;
 	char str2[size2];
 	random_string(str2, size2);
 
 	char buffer[size1+size2];
 	memset(buffer, 0, sizeof(buffer));
 
-	/* Create and write str1 to new tfs file */
 	int f;
 	assert(tfs_init() != -1);
 	assert((f = tfs_open(path, TFS_O_CREAT)) != -1);
+	assert(tfs_write(f, "A", 1) == strlen("A"));
+	assert(tfs_close(f) != -1);
 
-	write_struct w1 = { f, str1, size1 };
-	write_struct w2 = { f, str2, size2 };
+	reference r1 = { -1, str1, size1 };
+	reference r2 = { -1, str2, size2 };
 
 	pthread_t tid[2];
-	assert(pthread_create(&tid[0], NULL, write_to_tfs, (void*)&w1) == 0);
-	assert(pthread_create(&tid[1], NULL, write_to_tfs, (void*)&w2) == 0);
+	assert(pthread_create(&tid[0], NULL, append_to_tfs, &r1) == 0);
+	assert(pthread_create(&tid[1], NULL, append_to_tfs, &r2) == 0);
 	pthread_join(tid[0], NULL);
 	pthread_join(tid[1], NULL);
 
-	assert(tfs_close(f) != -1);
-
-	/* Write from tfs file to filesystem file */
 	assert(tfs_copy_to_external_fs(path, "write.txt") == 0);
 
 	FILE *fp = fopen("write.txt", "r");
+	assert(fp != NULL);
 
 	/* Two concatenations possible */
-	char opt1[size1+size2];
-	strcpy(opt1, str1);
-	strcat(opt1, str2);
-	char opt2[size1+size2];
-	strcpy(opt2, str2);
-	strcat(opt2, str1);
+	char opt1[1+size1+size2];
+	strcpy(opt1, "A");
+	strcat(opt1, r1.str);
+	strcat(opt1, r2.str);
+
+	char opt2[1+size1+size2];
+	strcpy(opt2, "A");
+	strcat(opt2, r2.str);
+	strcat(opt2, r1.str);
 
 	/* Check if contents are identical */
-	assert(fread(buffer, sizeof(char), strlen(str1) + strlen(str2), fp) == strlen(str1) + strlen(str2));
+	assert(fread(buffer, sizeof(char), strlen("A") + strlen(r1.str) + strlen(r2.str), fp) == strlen("A") + strlen(r1.str) + strlen(r2.str));
 	assert(strcmp(buffer, opt1) == 0 || strcmp(buffer, opt2) == 0);
 
 	fclose(fp);

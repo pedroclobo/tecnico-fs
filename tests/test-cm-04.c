@@ -3,7 +3,7 @@
 #include <string.h>
 
 /*
- * Copy from invalid tfs file
+ * Copy from invalid tfs file.
  */
 int main() {
 

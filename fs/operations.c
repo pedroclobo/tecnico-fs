@@ -42,6 +42,8 @@ int tfs_lookup(char const *name) {
 int tfs_open(char const *name, int flags) {
 	int inum;
 	size_t offset;
+	bool append = false;
+	int fhandle;
 
 	/* Checks if the path name is valid */
 	if (!valid_pathname(name)) {
@@ -49,19 +51,22 @@ int tfs_open(char const *name, int flags) {
 	}
 
 	inum = tfs_lookup(name);
+	inode_t *inode = NULL;
 
 	if (inum >= 0) {
 		/* The file already exists */
-		inode_t *inode = inode_get(inum);
+		inode = inode_get(inum);
 		if (inode == NULL) {
 			return -1;
 		}
+		pthread_rwlock_wrlock(&inode->lock);
 
 		/* Trucate (if requested) */
 		if (flags & TFS_O_TRUNC) {
 			if (inode->i_size > 0) {
 				for (int i = 0; inode->i_data_block[i] != -1; i++) {
 					if (data_block_free(inode->i_data_block[i]) == -1) {
+						pthread_rwlock_unlock(&inode->lock);
 						return -1;
 					}
 				}
@@ -70,6 +75,7 @@ int tfs_open(char const *name, int flags) {
 					int *indirect_block = data_block_get(inode->i_indirect_block);
 					for (int i = 0; indirect_block[i] != -1; i++) {
 						if (data_block_free(indirect_block[i]) == -1) {
+							pthread_rwlock_unlock(&inode->lock);
 							return -1;
 						}
 					}
@@ -82,9 +88,16 @@ int tfs_open(char const *name, int flags) {
 		/* Determine initial offset */
 		if (flags & TFS_O_APPEND) {
 			offset = inode->i_size;
+			append = true;
 		} else {
 			offset = 0;
 		}
+
+		fhandle = add_to_open_file_table(inum, offset, append);
+
+		pthread_rwlock_unlock(&inode->lock);
+
+		return fhandle;
 
 	} else if (flags & TFS_O_CREAT) {
 		/* The file doesn't exist; the flags specify that it should be created */
@@ -93,6 +106,10 @@ int tfs_open(char const *name, int flags) {
 		if (inum == -1) {
 			return -1;
 		}
+		inode = inode_get(inum);
+
+		pthread_rwlock_wrlock(&inode->lock);
+
 		/* Add entry in the root directory */
 		if (add_dir_entry(ROOT_DIR_INUM, inum, name + 1) == -1) {
 			inode_delete(inum);
@@ -100,14 +117,19 @@ int tfs_open(char const *name, int flags) {
 		}
 		offset = 0;
 
+		fhandle = add_to_open_file_table(inum, offset, append);
+
+		pthread_rwlock_unlock(&inode->lock);
+
+		return fhandle;
+
 	} else {
 		return -1;
 	}
 
-
 	/* Finally, add entry to the open file table and
 	 * return the corresponding handle */
-	return add_to_open_file_table(inum, offset);
+	//return add_to_open_file_table(inum, offset, append);
 
 	/* Note: for simplification, if file was created with TFS_O_CREAT and there
 	 * is an error adding an entry to the open file table, the file is not
@@ -136,8 +158,12 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
 	void *block;
 	int *indirect_block;
 
+	pthread_mutex_lock(&file->lock);
 	pthread_rwlock_wrlock(&inode->lock);
-	pthread_rwlock_wrlock(&file->lock);
+
+	if (file->of_append) {
+		file->of_offset = inode->i_size;
+	}
 
 	/* Block to start writing to */
 	int block_ind = file->of_offset / BLOCK_SIZE;
@@ -153,7 +179,7 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
 			}
 			if ((block = data_block_get(inode->i_data_block[block_ind++])) == NULL) {
 				pthread_rwlock_unlock(&inode->lock);
-				pthread_rwlock_unlock(&file->lock);
+				pthread_mutex_unlock(&file->lock);
 				return -1;
 			}
 
@@ -163,7 +189,7 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
 				inode->i_indirect_block = data_block_alloc();
 				if ((indirect_block = data_block_get(inode->i_indirect_block)) == NULL) {
 					pthread_rwlock_unlock(&inode->lock);
-					pthread_rwlock_unlock(&file->lock);
+					pthread_mutex_unlock(&file->lock);
 					return -1;
 				}
 
@@ -175,7 +201,7 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
 
 			if ((indirect_block = data_block_get(inode->i_indirect_block)) == NULL) {
 				pthread_rwlock_unlock(&inode->lock);
-				pthread_rwlock_unlock(&file->lock);
+				pthread_mutex_unlock(&file->lock);
 				return -1;
 			}
 
@@ -185,13 +211,13 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
 			}
 			if ((block = data_block_get(indirect_block[block_ind++ - DIRECT_BLOCK_NUMBER])) == NULL) {
 				pthread_rwlock_unlock(&inode->lock);
-				pthread_rwlock_unlock(&file->lock);
+				pthread_mutex_unlock(&file->lock);
 				return -1;
 			}
 
 		/* Can't write the whole buffer */
 		} else {
-			return written;
+			break;
 		}
 
 		/* First block */
@@ -224,7 +250,7 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
 	}
 
 	pthread_rwlock_unlock(&inode->lock);
-	pthread_rwlock_unlock(&file->lock);
+	pthread_mutex_unlock(&file->lock);
 
 	return written;
 }
@@ -241,8 +267,14 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
 		return -1;
 	}
 
+	pthread_rwlock_rdlock(&inode->lock);
+
+	pthread_mutex_lock(&file->lock);
+	size_t offset = file->of_offset;
+	pthread_mutex_unlock(&file->lock);
+
 	/* Determine how many bytes to read */
-	size_t to_read = inode->i_size - file->of_offset;
+	size_t to_read = inode->i_size - offset;
 	if (to_read > len) {
 		to_read = len;
 	}
@@ -251,37 +283,41 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
 	ssize_t read = 0;
 	ssize_t current_read = 0;
 	void *block;
-	int block_ind = file->of_offset / BLOCK_SIZE;
+	int block_ind = offset / BLOCK_SIZE;
 
 	while (to_read > 0) {
 
 		if (block_ind < DIRECT_BLOCK_NUMBER) {
 			if ((block = data_block_get(inode->i_data_block[block_ind++])) == NULL) {
+				pthread_rwlock_unlock(&inode->lock);
 				return -1;
 			}
 
 		} else if (block_ind < DIRECT_BLOCK_NUMBER + INDIRECT_BLOCK_NUMBER) {
 			int *indirect_block;
 			if ((indirect_block = data_block_get(inode->i_indirect_block)) == NULL) {
+				pthread_rwlock_unlock(&inode->lock);
 				return -1;
 			}
 
 			if ((block = data_block_get(indirect_block[block_ind++ - DIRECT_BLOCK_NUMBER])) == NULL) {
+				pthread_rwlock_unlock(&inode->lock);
 				return -1;
 			}
+
 		} else {
-			return -1;
+			break;
 		}
 
 		/* Perform the actual read */
 		/* First block */
 		if (read == 0) {
-			if ((to_read + (file->of_offset % BLOCK_SIZE)) / BLOCK_SIZE > 0) {
-				current_read = BLOCK_SIZE - (file->of_offset % BLOCK_SIZE);
+			if ((to_read + (offset % BLOCK_SIZE)) / BLOCK_SIZE > 0) {
+				current_read = BLOCK_SIZE - (offset % BLOCK_SIZE);
 			} else {
 				current_read = to_read;
 			}
-			memcpy(buffer, block + (file->of_offset % BLOCK_SIZE), current_read);
+			memcpy(buffer, block + (offset % BLOCK_SIZE), current_read);
 
 		/* Other blocks */
 		} else {
@@ -290,7 +326,7 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
 			} else {
 				current_read = to_read;
 			}
-			memcpy(buffer, block, current_read);
+			memcpy(buffer + read, block, current_read);
 		}
 
 		read += current_read;
@@ -299,7 +335,11 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
 
 	/* The offset associated with the file handle is
 	 * incremented accordingly */
+	pthread_mutex_lock(&file->lock);
 	file->of_offset += read;
+	pthread_mutex_unlock(&file->lock);
+
+	pthread_rwlock_unlock(&inode->lock);
 
 	return read;
 }

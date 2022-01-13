@@ -4,7 +4,7 @@
 #include <stdlib.h>
 
 /*
- * Test file truncation.
+ * Write and read larger string than tfs supports.
  */
 
 int random_seed = 1;
@@ -25,7 +25,7 @@ void random_string(char *buffer, size_t size) {
 int main() {
 
 	/* Create random large string */
-	size_t size = 7500;
+	size_t size = 300000;
 	char str[size];
 	random_string(str, size);
 
@@ -36,25 +36,16 @@ int main() {
 	int f;
 	assert(tfs_init() != -1);
 	assert((f = tfs_open(path, TFS_O_CREAT)) != -1);
-	assert(tfs_write(f, str, strlen(str)) == strlen(str));
+	assert(tfs_write(f, str, strlen(str)) == 272384);
 	assert(tfs_close(f) != -1);
 
-	assert((f = tfs_open(path, TFS_O_TRUNC)) != -1);
+	/* Terminate str here, so strcmp compares read string and str */
+	str[272384] = '\0';
+
+	assert((f = tfs_open(path, TFS_O_CREAT)) != -1);
+	assert(tfs_read(f, buffer, strlen(str)) == 272384);
+	assert(strcmp(buffer, str) == 0);
 	assert(tfs_close(f) != -1);
-
-	/* Write from tfs file to filesystem file */
-	int res = tfs_copy_to_external_fs(path, "write.txt");
-	assert(res == 0);
-
-	FILE *fp = fopen("write.txt", "r");
-
-	/* Check if file was created */
-	assert(fp != NULL);
-
-	/* Check if file was truncated */
-	assert(strcmp(buffer, "") == 0);
-
-	fclose(fp);
 
 	assert(tfs_destroy() != -1);
 
