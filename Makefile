@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -std=c11 -D_POSIX_C_SOURCE=200809L -pthread -fsanitize=thread -g
+CFLAGS = -std=c11 -D_POSIX_C_SOURCE=200809L -pthread
 
 INCLUDE_DIRS := fs .
 INCLUDES = $(addprefix -I, $(INCLUDE_DIRS))

@@ -2,10 +2,10 @@
 #include <assert.h>
 #include <pthread.h>
 #include <stdlib.h>
-#include <string.h>
 
 /*
- * Read concurrently to one tfs file, from the same file handle.
+ * Open two tfs files, concurrently.
+ * They must have distinct file handles.
  */
 
 char *path = "/f1";
@@ -15,8 +15,6 @@ void *open_from_tfs(void *arg) {
 
 	*f = tfs_open(path, TFS_O_CREAT);
 	assert(*f != -1);
-
-	assert(tfs_close(*f) != -1);
 
 	return f;
 }
@@ -36,9 +34,12 @@ int main() {
 	int *f1 = (int*) p1;
 	int *f2 = (int*) p2;
 
-	assert(tfs_destroy() != -1);
+	tfs_close(*f1);
+	tfs_close(*f2);
 
 	assert(*f1 != *f2);
+
+	assert(tfs_destroy() != -1);
 
 	printf("\033[0;32mSuccessful test.\n\033[0m");
 
