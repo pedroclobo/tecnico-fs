@@ -406,27 +406,19 @@ int add_to_open_file_table(int inumber, size_t offset, bool append) {
 
 	for (int i = 0; i < MAX_OPEN_FILES; i++) {
 		if (free_open_file_entries[i] == FREE) {
-			printf("%d, FREE\n", i);
 			free_open_file_entries[i] = TAKEN;
-			if (free_open_file_entries[i] == TAKEN)
-				printf("after assignment: %d, TAKEN\n", i);
-			else
-				printf("after assignment: %d, FREE\n", i);
 
+			pthread_mutex_lock(&open_file_table[i].lock);
 
 			open_file_table[i].of_inumber = inumber;
 			open_file_table[i].of_offset = offset;
 			open_file_table[i].of_append = append;
 
 			pthread_mutex_unlock(&open_file_table[i].lock);
-
 			pthread_mutex_unlock(&free_open_file_entries_lock);
-
-			printf("return value: %d\n", i);
 
 			return i;
 		}
-		printf("%d, TAKEN\n", i);
 	}
 
 	pthread_mutex_unlock(&free_open_file_entries_lock);

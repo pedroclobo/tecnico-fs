@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+pthread_mutex_t open_lock = PTHREAD_MUTEX_INITIALIZER;
+
 int tfs_init() {
 	state_init();
 
@@ -50,12 +52,13 @@ int tfs_open(char const *name, int flags) {
 		return -1;
 	}
 
+	pthread_mutex_lock(&open_lock);
 	inum = tfs_lookup(name);
-	inode_t *inode = NULL;
+	pthread_mutex_unlock(&open_lock);
 
 	if (inum >= 0) {
 		/* The file already exists */
-		inode = inode_get(inum);
+		inode_t *inode = inode_get(inum);
 		if (inode == NULL) {
 			return -1;
 		}
@@ -93,11 +96,7 @@ int tfs_open(char const *name, int flags) {
 			offset = 0;
 		}
 
-		fhandle = add_to_open_file_table(inum, offset, append);
-
 		pthread_rwlock_unlock(&inode->lock);
-
-		return fhandle;
 
 	} else if (flags & TFS_O_CREAT) {
 		/* The file doesn't exist; the flags specify that it should be created */
@@ -106,22 +105,19 @@ int tfs_open(char const *name, int flags) {
 		if (inum == -1) {
 			return -1;
 		}
-		inode = inode_get(inum);
+		inode_t *inode = inode_get(inum);
 
 		pthread_rwlock_wrlock(&inode->lock);
 
 		/* Add entry in the root directory */
 		if (add_dir_entry(ROOT_DIR_INUM, inum, name + 1) == -1) {
 			inode_delete(inum);
+			pthread_rwlock_unlock(&inode->lock);
 			return -1;
 		}
 		offset = 0;
 
-		fhandle = add_to_open_file_table(inum, offset, append);
-
 		pthread_rwlock_unlock(&inode->lock);
-
-		return fhandle;
 
 	} else {
 		return -1;
@@ -129,7 +125,7 @@ int tfs_open(char const *name, int flags) {
 
 	/* Finally, add entry to the open file table and
 	 * return the corresponding handle */
-	//return add_to_open_file_table(inum, offset, append);
+	return add_to_open_file_table(inum, offset, append);
 
 	/* Note: for simplification, if file was created with TFS_O_CREAT and there
 	 * is an error adding an entry to the open file table, the file is not
@@ -158,8 +154,8 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
 	void *block;
 	int *indirect_block;
 
-	pthread_mutex_lock(&file->lock);
 	pthread_rwlock_wrlock(&inode->lock);
+	pthread_mutex_lock(&file->lock);
 
 	if (file->of_append) {
 		file->of_offset = inode->i_size;
