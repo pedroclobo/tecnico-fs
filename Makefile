@@ -23,4 +23,7 @@ tests:: $(OBJECTS) $(TEST_OBJECTS) $(TESTS)
 	done
 
 clean::
-	rm -f $(OBJECTS) $(TARGET_EXECS) $(TESTS) $(TEST_OBJECTS) *.txt
+	rm -f $(OBJECTS) $(TARGET_EXECS) $(TESTS) $(TEST_OBJECTS) *.txt *.zip
+
+zip::
+	zip proj.zip Makefile fs/*.c fs/*.h tests/test-p-01.c tests/test-p-02.c tests/test-p-03.c
